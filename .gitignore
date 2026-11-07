@@ -1,0 +1,17 @@
+# OS clutter
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
+
+# Never commit keys or secrets
+*.pem
+*.key
+id_*
+.env
+
+# Private notes
+docs/plan.md
