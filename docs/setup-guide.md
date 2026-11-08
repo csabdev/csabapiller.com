@@ -1,7 +1,8 @@
 # Server setup guide
 
 How to build the server for this site from scratch.
-Placeholders: `<SERVER_IP>` is the server's public IPv4 address, `<USER>` the admin user name.
+Placeholders: `<SERVER_IP>` / `<SERVER_IPV6>` are the server's public IPv4 / IPv6 addresses,
+`<USER>` is the admin user name.
 
 ## Requirements
 - Hetzner Cloud account
@@ -109,6 +110,175 @@ sudo nginx -t
 sudo systemctl reload nginx
 ```
 Check: `http://<SERVER_IP>` shows the page.
+
+## 9. DNS
+For both `csabapiller.com` and `csabapiller.hu`, with no proxying (Cloudflare: DNS only):
+
+| Type | Name | Content |
+|---|---|---|
+| A | `@` | `<SERVER_IP>` |
+| AAAA | `@` | `<SERVER_IPV6>` |
+| A | `www` | `<SERVER_IP>` |
+| AAAA | `www` | `<SERVER_IPV6>` |
+
+`<SERVER_IPV6>` is shown by `ip -6 addr show scope global`. Check: `nslookup <name>` for all four names.
+
+## 10. nginx for the domain names
+Replace `/etc/nginx/sites-available/csabapiller.com` with:
+```
+# Unknown names and the bare IP address: close the connection without answering.
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+    return 444;
+}
+
+# The other three names: redirect permanently to the canonical name.
+server {
+    listen 80;
+    listen [::]:80;
+    server_name www.csabapiller.com csabapiller.hu www.csabapiller.hu;
+    return 301 http://csabapiller.com$request_uri;
+}
+
+# The canonical site.
+server {
+    listen 80;
+    listen [::]:80;
+    server_name csabapiller.com;
+
+    root /var/www/csabapiller.com;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ =404;
+    }
+}
+```
+```
+sudo nginx -t
+sudo systemctl reload nginx
+```
+Check: `curl -I http://csabapiller.com` → 200; the other names → 301 to `http://csabapiller.com/`;
+`curl -I http://<SERVER_IP>` → empty reply.
+
+## 11. Certificate (Let's Encrypt)
+```
+sudo apt install certbot python3-certbot-nginx -y
+sudo certbot certonly --nginx -d csabapiller.com -d www.csabapiller.com -d csabapiller.hu -d www.csabapiller.hu
+sudo certbot certificates
+sudo certbot renew --dry-run
+```
+
+## 12. HTTPS in nginx
+Replace `/etc/nginx/sites-available/csabapiller.com` with:
+```
+# ---------- HTTP (port 80) ----------
+
+# Unknown names and the bare IP address: close the connection without answering.
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+    return 444;
+}
+
+# Our four names over plain HTTP: redirect to the canonical HTTPS address.
+# The redirect is inside "location /" so that certbot's challenge location
+# (an exact match, which nginx prefers) still works during renewals.
+server {
+    listen 80;
+    listen [::]:80;
+    server_name csabapiller.com www.csabapiller.com csabapiller.hu www.csabapiller.hu;
+
+    location / {
+        return 301 https://csabapiller.com$request_uri;
+    }
+}
+
+# ---------- HTTPS (port 443) ----------
+
+# Unknown names and the bare IP address: refuse the TLS handshake.
+server {
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
+    server_name _;
+    ssl_reject_handshake on;
+}
+
+# The other three names over HTTPS: redirect to the canonical name.
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name www.csabapiller.com csabapiller.hu www.csabapiller.hu;
+
+    ssl_certificate     /etc/letsencrypt/live/csabapiller.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/csabapiller.com/privkey.pem;
+
+    return 301 https://csabapiller.com$request_uri;
+}
+
+# The canonical site.
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name csabapiller.com;
+
+    ssl_certificate     /etc/letsencrypt/live/csabapiller.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/csabapiller.com/privkey.pem;
+
+    root /var/www/csabapiller.com;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ =404;
+    }
+}
+```
+```
+sudo nginx -t
+sudo systemctl reload nginx
+```
+Reload nginx after each certificate renewal with a deploy hook,
+`/etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh`:
+```
+#!/bin/sh
+systemctl reload nginx
+```
+```
+sudo chmod +x /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh
+sudo certbot renew --dry-run --run-deploy-hooks
+```
+Check: `https://csabapiller.com` → 200; all other names and `http://` → 301 to
+`https://csabapiller.com/`; `https://<SERVER_IP>` → TLS handshake refused.
+
+## 13. Security headers
+In `/etc/nginx/nginx.conf`, set the existing line to `server_tokens off;`.
+
+`/etc/nginx/snippets/security-headers.conf`:
+```
+add_header Strict-Transport-Security "max-age=31536000" always;
+add_header Content-Security-Policy "default-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" always;
+add_header X-Content-Type-Options "nosniff" always;
+add_header X-Frame-Options "DENY" always;
+add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+```
+On a fresh setup, start HSTS at `max-age=86400` and raise it once HTTPS is confirmed working.
+
+Add to both HTTPS server blocks, after `ssl_certificate_key`:
+```
+    include snippets/security-headers.conf;
+```
+```
+sudo nginx -t
+sudo systemctl reload nginx
+```
+Check: `curl -I https://csabapiller.com` shows the headers and `server: nginx` without a version.
+SSL Labs and securityheaders.com: grade A.
 
 ## Health check
 Re-run every few weeks.
