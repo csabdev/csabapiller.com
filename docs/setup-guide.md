@@ -109,3 +109,18 @@ sudo nginx -t
 sudo systemctl reload nginx
 ```
 Check: `http://<SERVER_IP>` shows the page.
+
+## Health check
+Re-run every few weeks.
+```
+sudo ss -tulpn
+sudo journalctl -u ssh --since "7 days ago" | grep -E "Accepted (publickey|password)"
+awk -F: '$3 == 0 {print $1}' /etc/passwd
+getent group sudo
+apt list --upgradable
+ls /var/run/reboot-required 2>/dev/null && echo "Reboot needed" || echo "No reboot needed"
+sudo tail -5 /var/log/unattended-upgrades/unattended-upgrades.log
+systemctl --failed
+```
+Expected: only sshd and nginx listen publicly; logins only by `<USER>` with a public key;
+only `root` has UID 0; only `<USER>` is in `sudo`; no pending updates; no failed units.
