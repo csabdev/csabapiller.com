@@ -280,6 +280,34 @@ sudo systemctl reload nginx
 Check: `curl -I https://csabapiller.com` shows the headers and `server: nginx` without a version.
 SSL Labs and securityheaders.com: grade A.
 
+## 14. Deploy user
+A user that can only write the website files: no password, no sudo, its own SSH key.
+
+Local machine (no passphrase; used by automation):
+```
+ssh-keygen -t ed25519 -f ~/.ssh/deploy_csabapiller -C "deploy@csabapiller.com"
+scp ~/.ssh/deploy_csabapiller.pub <USER>@csabapiller.com:~
+```
+Server:
+```
+sudo adduser --disabled-password deploy
+sudo chown -R deploy:deploy /var/www/csabapiller.com
+sudo install -d -m 700 -o deploy -g deploy /home/deploy/.ssh
+sudo install -m 600 -o deploy -g deploy ~/deploy_csabapiller.pub /home/deploy/.ssh/authorized_keys
+rm ~/deploy_csabapiller.pub
+```
+In `/etc/ssh/sshd_config.d/00-hardening.conf`: `AllowUsers <USER> deploy`
+```
+sudo sshd -t
+sudo systemctl restart ssh
+sudo sshd -T | grep -i allowusers
+```
+Check and deploy manually:
+```
+ssh -i ~/.ssh/deploy_csabapiller deploy@csabapiller.com "whoami; sudo -n true"   # deploy; sudo refused
+scp -i ~/.ssh/deploy_csabapiller index.html style.css deploy@csabapiller.com:/var/www/csabapiller.com/
+```
+
 ## Health check
 Re-run every few weeks.
 ```
@@ -292,5 +320,5 @@ ls /var/run/reboot-required 2>/dev/null && echo "Reboot needed" || echo "No rebo
 sudo tail -5 /var/log/unattended-upgrades/unattended-upgrades.log
 systemctl --failed
 ```
-Expected: only sshd and nginx listen publicly; logins only by `<USER>` with a public key;
+Expected: only sshd and nginx listen publicly; logins only by `<USER>` or `deploy` with a public key;
 only `root` has UID 0; only `<USER>` is in `sudo`; no pending updates; no failed units.
