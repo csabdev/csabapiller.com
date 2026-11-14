@@ -316,6 +316,17 @@ command="/usr/bin/rrsync /var/www/csabapiller.com",restrict ssh-ed25519 AAAA… 
 Keep the file owned by `deploy` with mode 600. Check: `ssh -i ~/.ssh/deploy_csabapiller deploy@csabapiller.com whoami`
 fails with `SSH_ORIGINAL_COMMAND does not run rsync`.
 
+## 16. Automatic deployment (GitHub Actions)
+The website lives in `site/`. Workflow: `.github/workflows/deploy.yml`, which runs on push to `main`.
+
+Repository secrets (Settings → Secrets and variables → Actions):
+- `DEPLOY_SSH_KEY`: the private deploy key (`~/.ssh/deploy_csabapiller`)
+- `DEPLOY_KNOWN_HOSTS`: the server's host key in known_hosts format. On the server:
+  ```
+  awk '{print "csabapiller.com", $1, $2}' /etc/ssh/ssh_host_ed25519_key.pub
+  ```
+Check: the Actions tab shows a green "Deploy" run after a push that changes `site/`.
+
 ## Health check
 Re-run every few weeks.
 ```
