@@ -308,17 +308,33 @@ ssh -i ~/.ssh/deploy_csabapiller deploy@csabapiller.com "whoami; sudo -n true"  
 scp -i ~/.ssh/deploy_csabapiller index.html style.css deploy@csabapiller.com:/var/www/csabapiller.com/
 ```
 
+## 15. Restrict the deploy key
+Limit the key to rsync into the web root. In `/home/deploy/.ssh/authorized_keys`, prefix the key line:
+```
+command="/usr/bin/rrsync /var/www/csabapiller.com",restrict ssh-ed25519 AAAA… deploy@csabapiller.com
+```
+Keep the file owned by `deploy` with mode 600. Check: `ssh -i ~/.ssh/deploy_csabapiller deploy@csabapiller.com whoami`
+fails with `SSH_ORIGINAL_COMMAND does not run rsync`.
+
 ## Health check
 Re-run every few weeks.
 ```
-sudo ss -tulpn
-sudo journalctl -u ssh --since "7 days ago" | grep -E "Accepted (publickey|password)"
-awk -F: '$3 == 0 {print $1}' /etc/passwd
-getent group sudo
-apt list --upgradable
-ls /var/run/reboot-required 2>/dev/null && echo "Reboot needed" || echo "No reboot needed"
-sudo tail -5 /var/log/unattended-upgrades/unattended-upgrades.log
-systemctl --failed
+echo "=== Uptime and reboots ==="; uptime; sudo journalctl --list-boots --no-pager | tail -5
+echo "=== Disk and memory ==="; df -h /; free -h
+echo "=== Listening ports ==="; sudo ss -tulpn | grep -vE '127\.0\.0|\[::1\]'
+echo "=== Logins (last 7 days) ==="; sudo journalctl -u ssh --since "7 days ago" | grep -E "Accepted (publickey|password)"
+echo "=== Accounts ==="; awk -F: '$3 == 0 {print $1}' /etc/passwd; getent group sudo
+echo "=== Updates ==="; apt list --upgradable 2>/dev/null; ls /var/run/reboot-required 2>/dev/null && echo "Reboot needed" || echo "No reboot needed"
+echo "=== Failed services ==="; systemctl --failed --no-legend
+echo "=== Certificate ==="; sudo certbot certificates 2>/dev/null | grep -E "Domains|Expiry"; systemctl list-timers 'certbot*' --no-pager --no-legend
+echo "=== nginx config ==="; sudo nginx -t
 ```
-Expected: only sshd and nginx listen publicly; logins only by `<USER>` or `deploy` with a public key;
-only `root` has UID 0; only `<USER>` is in `sudo`; no pending updates; no failed units.
+Expected: only ports 22, 80 and 443 are public; logins only by `<USER>` or `deploy` with a public key;
+only `root` has UID 0; only `<USER>` is in `sudo`; no failed units; certificate valid for more
+than 30 days; nginx test passes.
+
+Then install remaining (non-security) updates; unattended-upgrades only installs security updates:
+```
+sudo apt update && sudo apt upgrade
+ls /var/run/reboot-required 2>/dev/null && sudo reboot
+```
