@@ -14,5 +14,5 @@ id_*
 .env
 
 # Private notes
-docs/plan.md
+docs/plan*.md
 docs/server-setup.md
